@@ -1,18 +1,21 @@
-def generate_perm(word_length):
-    from itertools import permutations, combinations
+from itertools import permutations
+
+
+def generate_perm(word_length, p_file):
+    p_file.writelines("\nWord Length:\t\t" + str(word_length) + "\n")
     octave_note_len = 8
     simple_scale = list(["S", "R", "G", "M", "P", "D", "N"])
     len_scale = len(simple_scale)
     scale_index = list(range(0, len_scale))
     p_list = list(permutations(scale_index, word_length))
-    print("Combinations: ", 2*len(p_list))
+    p_file.writelines("Combinations:\t\t" + str(2*len(p_list)) + "\n")
     for each_p in p_list:
         asc_palta = desc_palta = ""
         formula_set = list()
         tmp = each_p[0]
         for each_index in each_p:
             formula_set.append(each_index - tmp)
-        print("\nFormula:\t", formula_set)
+        p_file.writelines("\nFormula:\t\t" + str(formula_set) + "\n")
         for i in range(0, octave_note_len):
             for j in range(0, word_length):
                 asc_palta = asc_palta + \
@@ -23,23 +26,19 @@ def generate_perm(word_length):
             desc_palta = desc_palta + " "
         asc_palta = asc_palta + "-" + asc_palta[::-1]
         desc_palta = desc_palta + "-" + desc_palta[::-1]
-        print("Ascending :\t", asc_palta)
-        print("Descending :\t", desc_palta)
+        p_file.writelines("Ascending:\t\t"+asc_palta + "\n")
+        p_file.writelines("Descending:\t\t"+desc_palta + "\n")
 
 
 def main():
-    print("\n--------Word Length: 2--------\n")
-    generate_perm(2)
-    print("\n--------Word Length: 3--------\n")
-    generate_perm(3)
-    print("\n--------Word Length: 4--------\n")
-    generate_perm(4)
-    print("\n--------Word Length: 5--------\n")
-    generate_perm(5)
-    print("\n--------Word Length: 6--------\n")
-    generate_perm(6)
-    print("\n--------Word Length: 7--------\n")
-    generate_perm(7)
+    p_file = open('GeneratedPaltas.txt', 'w')
+    generate_perm(2, p_file)
+    generate_perm(3, p_file)
+    generate_perm(4, p_file)
+    generate_perm(5, p_file)
+    generate_perm(6, p_file)
+    generate_perm(7, p_file)
+    p_file.close()
 
 
 if __name__ == "__main__":
