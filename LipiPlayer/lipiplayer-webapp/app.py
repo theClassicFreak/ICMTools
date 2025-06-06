@@ -3,6 +3,7 @@ import os
 import tempfile
 import pandas as pd
 import time
+import numpy as np
 from utils.audio_utils import (
     load_audio,
     export_wav,
@@ -40,7 +41,7 @@ if uploaded_file:
     st.session_state.audio, st.session_state.audio_bytes = load_audio(uploaded_file)
     st.session_state.audio_file_name = uploaded_file.name
     st.session_state.sliced_audio = None  # Reset slice
-    st.session_state.transcription_data = []
+    st.session_state.transcription_data = []  # <-- Only reset here!
     st.success(f"Loaded: {uploaded_file.name}")
 
 # --- Root Note Selection ---
@@ -121,10 +122,58 @@ if st.button("Transcribe") and audio_to_play:
 if st.session_state.transcription_data:
     df = pd.DataFrame(
         st.session_state.transcription_data,
-        columns=["Timestamp", "Frequency", "Solfege", "Duration", "Count"]
+        columns=["Timestamp", "Frequency", "Swara", "Duration", "Count"]
     )
-    st.dataframe(df)
-    # --- PDF Export ---
+
+    # Center align all columns and set a slightly larger font
+    styled_df = (
+        df.style
+        .set_properties(**{'text-align': 'center', 'font-size': '16px'})
+        .set_table_styles(
+            [{'selector': 'th', 'props': [('text-align', 'center'), ('font-size', '17px')]}]
+        )
+    )
+    st.dataframe(styled_df, use_container_width=True)
+
+    # --- Swara Sequences for 25%, 50%, 75% ---
+    percentiles = {
+        "Top 25% (longest)": 75,
+        "Top 50%": 50,
+        "Top 75% (shortest)": 25
+    }
+
+    def group_swaras_by_time(filtered_df, time_gap_sec=1.0):
+        # Parse timestamp to seconds
+        def ts_to_sec(ts):
+            h, m, s_ms = ts.split(":")
+            s, ms = s_ms.split(".")
+            return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000.0
+        times = filtered_df["Timestamp"].apply(ts_to_sec).tolist()
+        swaras = filtered_df["Swara"].tolist()
+        if not times:
+            return ""
+        groups = []
+        current_group = [swaras[0]]
+        for i in range(1, len(times)):
+            if times[i] - times[i-1] <= time_gap_sec:
+                current_group.append(swaras[i])
+            else:
+                groups.append(" ".join(current_group))
+                current_group = [swaras[i]]
+        groups.append(" ".join(current_group))
+        return "   ".join(groups)  # 3 spaces between groups
+
+    for label, perc in percentiles.items():
+        count_threshold = int(np.percentile(df["Count"].astype(int), perc))
+        filtered = df[df["Count"].astype(int) >= count_threshold].sort_values("Timestamp")
+        swara_sequence = group_swaras_by_time(filtered)
+        st.text_area(
+            f"{label} Swara sequence (Count ≥ {count_threshold}, grouped by time):",
+            swara_sequence,
+            height=100
+        )
+
+    # --- PDF Download at the Bottom ---
     pdf_bytes = generate_pdf(
         st.session_state.transcription_data,
         st.session_state.audio_file_name,
@@ -134,7 +183,6 @@ if st.session_state.transcription_data:
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     base_name = os.path.splitext(st.session_state.audio_file_name)[0]
     pdf_filename = f"Transcription_{base_name}_{st.session_state.root_note}_{timestamp}.pdf"
-
     st.download_button(
         "Download PDF",
         pdf_bytes,
