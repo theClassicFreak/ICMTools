@@ -5,7 +5,7 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 
-def generate_pdf(transcription_data, file_name, root_note, total_length):
+def generate_pdf(transcription_data, file_name, transposition, total_length):
     """Generate a professional, more spacious and mobile-friendly PDF report."""
     buffer = io.BytesIO()
     # Use landscape for more width (optional, comment out if you want portrait)
@@ -24,7 +24,7 @@ def generate_pdf(transcription_data, file_name, root_note, total_length):
     title = Paragraph("<b>Transcription Report</b>", title_style)
     file_info = Paragraph(
         f"<b>File:</b> {file_name}<br/><b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br/>"
-        f"<b>Root Note:</b> {root_note}<br/><b>Total Duration:</b> {total_length}",
+        f"<b>Transposition:</b> {transposition} semitones<br/><b>Total Duration:</b> {total_length}",
         normal_style
     )
     elements.extend([title, file_info, Spacer(1, 18)])

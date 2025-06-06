@@ -1,9 +1,7 @@
 import streamlit as st
 import os
-import tempfile
 import pandas as pd
 import time
-import numpy as np
 from utils.audio_utils import (
     load_audio,
     export_wav,
@@ -12,40 +10,47 @@ from utils.audio_utils import (
 )
 from utils.transcription import (
     transcribe_audio,
-    NOTE_NAMES,
+    note_to_swara,
 )
 from utils.pdf_utils import generate_pdf
 
 st.set_page_config(page_title="LipiPlayer WebApp", layout="centered")
 st.title("LipiPlayer WebApp 🎶")
 
+# --- Notification Panel ---
+notification_placeholder = st.empty()
+
 # --- Session State Initialization ---
-if "audio" not in st.session_state:
-    st.session_state.audio = None
-if "audio_bytes" not in st.session_state:
-    st.session_state.audio_bytes = None
-if "audio_file_name" not in st.session_state:
-    st.session_state.audio_file_name = ""
-if "root_note" not in st.session_state:
-    st.session_state.root_note = NOTE_NAMES[0]
-if "sliced_audio" not in st.session_state:
-    st.session_state.sliced_audio = None
-if "transcription_data" not in st.session_state:
-    st.session_state.transcription_data = []
-if "playback_status" not in st.session_state:
-    st.session_state.playback_status = "stopped"
+for key, default in [
+    ("audio", None),
+    ("audio_bytes", None),
+    ("audio_file_name", ""),
+    ("sliced_audio", None),
+    ("transcription_data_original", None),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 # --- File Upload ---
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
 uploaded_file = st.file_uploader("Upload MP3", type=["mp3"])
 if uploaded_file:
-    st.session_state.audio, st.session_state.audio_bytes = load_audio(uploaded_file)
-    st.session_state.audio_file_name = uploaded_file.name
-    st.session_state.sliced_audio = None  # Reset slice
-    st.session_state.transcription_data = []  # <-- Only reset here!
-    st.success(f"Loaded: {uploaded_file.name}")
-
-# --- Root Note Selection ---
-st.session_state.root_note = st.selectbox("Root Note", NOTE_NAMES, index=NOTE_NAMES.index(st.session_state.root_note))
+    if uploaded_file.size > MAX_FILE_SIZE:
+        st.error("File too large. Please upload a file smaller than 10 MB.")
+        st.stop()
+    if not uploaded_file.name.lower().endswith('.mp3'):
+        st.error("Only MP3 files are allowed.")
+        st.stop()
+    try:
+        st.session_state.audio, st.session_state.audio_bytes = load_audio(uploaded_file)
+        st.session_state.audio_file_name = uploaded_file.name
+        st.session_state.sliced_audio = None
+        st.session_state.transcription_data_original = None
+        notification_placeholder.success(f"Loaded: {uploaded_file.name}")
+    except Exception:
+        st.error("Failed to process audio file. Please upload a valid MP3.")
+        st.stop()
 
 # --- Audio Length Display ---
 if st.session_state.audio:
@@ -68,27 +73,30 @@ end_ms = col8.text_input("End ms", "000")
 slice_col, reset_col = st.columns([1, 1])
 with slice_col:
     if st.button("Slice Audio") and st.session_state.audio:
-        # Stop playback by clearing audio_bytes
-        audio_bytes = None
-        st.session_state.sliced_audio = None  # Clear any previous slice
+        st.session_state.sliced_audio = None
+        st.session_state.transcription_data_original = None
         start_ms_total = int(start_h)*3600*1000 + int(start_m)*60*1000 + int(start_s)*1000 + int(start_ms)
         end_ms_total = int(end_h)*3600*1000 + int(end_m)*60*1000 + int(end_s)*1000 + int(end_ms)
         if 0 <= start_ms_total < end_ms_total <= len(st.session_state.audio):
             st.session_state.sliced_audio = slice_audio(st.session_state.audio, start_ms_total, end_ms_total)
-            st.success("Audio sliced!")
+            notification_placeholder.success("Audio sliced!")
         else:
-            st.error("Invalid slice times.")
+            notification_placeholder.error("Invalid slice times.")
 with reset_col:
     if st.button("Reset to Full Audio"):
-        # Stop playback by clearing audio_bytes
-        audio_bytes = None
         st.session_state.sliced_audio = None
-        st.success("Reverted to full audio.")
+        st.session_state.transcription_data_original = None
+        notification_placeholder.success("Reverted to full audio.")
 
 # --- Playback Controls ---
 st.subheader("Playback Controls")
 audio_to_play = st.session_state.sliced_audio if st.session_state.sliced_audio else st.session_state.audio
 audio_bytes = export_wav(audio_to_play) if audio_to_play else None
+
+if st.session_state.sliced_audio:
+    st.info("Playing: Sliced Audio")
+elif st.session_state.audio:
+    st.info("Playing: Full Audio")
 
 loop = st.checkbox("Loop audio (browser support required)", value=False)
 
@@ -108,24 +116,41 @@ if audio_bytes:
     else:
         st.audio(audio_bytes, format=audio_format)
 else:
-    st.info("Upload and/or slice audio to enable playback.")
+    notification_placeholder.info("Upload and/or slice audio to enable playback.")
 
 # --- Transcription ---
 st.subheader("Transcription")
-if st.button("Transcribe") and audio_to_play:
-    st.session_state.transcription_data = transcribe_audio(audio_to_play, st.session_state.root_note)
-    if st.session_state.transcription_data:
-        st.success("Transcription complete!")
-    else:
-        st.warning("No transcription data found.")
 
-if st.session_state.transcription_data:
+# --- Transposition Control (just above Transcribe) ---
+semitone_shift = st.number_input(
+    "Transpose (semitones, -12 to +12):",
+    min_value=-12,
+    max_value=12,
+    value=0,
+    step=1,
+    format="%d"
+)
+
+if st.button("Transcribe") and audio_to_play:
+    st.session_state.transcription_data_original = transcribe_audio(audio_to_play, semitone_shift=0)
+    notification_placeholder.success("Transcription complete!")
+
+if st.session_state.transcription_data_original:
+    shifted_data = [
+        (
+            row[0],  # Timestamp
+            row[1],  # Frequency
+            note_to_swara(float(row[1]), semitone_shift),  # Swara with shift
+            row[3],  # Duration
+            row[4],  # Count
+        )
+        for row in st.session_state.transcription_data_original
+    ]
     df = pd.DataFrame(
-        st.session_state.transcription_data,
+        shifted_data,
         columns=["Timestamp", "Frequency", "Swara", "Duration", "Count"]
     )
 
-    # Center align all columns and set a slightly larger font
     styled_df = (
         df.style
         .set_properties(**{'text-align': 'center', 'font-size': '16px'})
@@ -135,7 +160,6 @@ if st.session_state.transcription_data:
     )
     st.dataframe(styled_df, use_container_width=True)
 
-    # --- Swara Sequences for 25%, 50%, 75% ---
     percentiles = {
         "Top 25% (longest)": 75,
         "Top 50%": 50,
@@ -143,7 +167,6 @@ if st.session_state.transcription_data:
     }
 
     def group_swaras_by_time(filtered_df, time_gap_sec=1.0):
-        # Parse timestamp to seconds
         def ts_to_sec(ts):
             h, m, s_ms = ts.split(":")
             s, ms = s_ms.split(".")
@@ -161,10 +184,10 @@ if st.session_state.transcription_data:
                 groups.append(" ".join(current_group))
                 current_group = [swaras[i]]
         groups.append(" ".join(current_group))
-        return "   ".join(groups)  # 3 spaces between groups
+        return "   ".join(groups)
 
     for label, perc in percentiles.items():
-        count_threshold = int(np.percentile(df["Count"].astype(int), perc))
+        count_threshold = int(pd.Series(df["Count"].astype(int)).quantile(perc/100))
         filtered = df[df["Count"].astype(int) >= count_threshold].sort_values("Timestamp")
         swara_sequence = group_swaras_by_time(filtered)
         st.text_area(
@@ -173,16 +196,15 @@ if st.session_state.transcription_data:
             height=100
         )
 
-    # --- PDF Download at the Bottom ---
     pdf_bytes = generate_pdf(
-        st.session_state.transcription_data,
+        shifted_data,
         st.session_state.audio_file_name,
-        st.session_state.root_note,
+        semitone_shift,
         get_audio_length(audio_to_play)
     )
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     base_name = os.path.splitext(st.session_state.audio_file_name)[0]
-    pdf_filename = f"Transcription_{base_name}_{st.session_state.root_note}_{timestamp}.pdf"
+    pdf_filename = f"Transcription_{base_name}_transpose_{semitone_shift}_{timestamp}.pdf"
     st.download_button(
         "Download PDF",
         pdf_bytes,
