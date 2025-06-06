@@ -212,10 +212,3 @@ if st.session_state.transcription_data_original:
         file_name=pdf_filename,
         mime="application/pdf"
     )
-
-# --- FFmpeg Check ---
-try:
-    out = subprocess.check_output(["ffmpeg", "-version"])
-    st.success("ffmpeg is installed and available!")
-except Exception as e:
-    st.error(f"ffmpeg not found: {e}")
